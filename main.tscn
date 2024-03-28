@@ -1,0 +1,22 @@
+[gd_scene load_steps=3 format=3 uid="uid://bo4usdsi4udh0"]
+
+[ext_resource type="Shader" path="res://pathtracer.gdshader" id="1_aisln"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_otsgt"]
+shader = ExtResource("1_aisln")
+
+[node name="Node" type="Node"]
+
+[node name="Control" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="ColorRect" type="ColorRect" parent="Control"]
+material = SubResource("ShaderMaterial_otsgt")
+layout_mode = 1
+offset_left = -127.0
+offset_top = -55.0
+offset_right = 1793.0
+offset_bottom = 1025.0
