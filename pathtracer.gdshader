@@ -1,6 +1,6 @@
 shader_type canvas_item;
-const vec3 BACKGROUND = vec3(0.5, 0.7, 1.0);
-const int MAX_SPHERES = 3;
+const vec3 BACKGROUND = vec3(1.0);
+const int MAX_SPHERES = 4;
 const int SAMPLES_PER_PIXEL = 32;
 const int MAX_BOUNCES = 10;
 struct Ray {
@@ -29,36 +29,62 @@ struct Material{
 
 struct PointLight{
 	vec3 position;
-	vec3 color;
-	float intensity;
+	vec4 color; //xyz color, w for intensity
 };
-
-const Material materials[MAX_SPHERES] = Material[](
-	Material(0,0,0.0,0.0,0.0,vec4(0.0,1.0,0.0,1.0)),
-	Material(1,1,0.5,1.0,0.0,vec4(0.0,0.0,1.0,1.0)),
-	Material(2,2,0.1,0.0,1.5,vec4(1.0,0.0,0.0,1.0))
+const PointLight PointLights[3]  = PointLight[](
+	PointLight(vec3(0.0,-3.0,0.0),vec4(1.0,1.0,1.0,3.0)),
+	PointLight(vec3(-2.0,-3.0,0.0),vec4(1.0,1.0,1.0,30.0)),
+	PointLight(vec3(2.0,-3.0,0.0),vec4(1.0,1.0,1.0,30.0))
+);
+const Material materials[4] = Material[](
+	Material(1,1,0.5,1.0,0.0,vec4(1.0,1.0,1.0,1.0)),// White lambertian material
+	Material(0,0,0.0,0.0,0.0,vec4(0.0,1.0,0.0,1.0)),// Green lambertian material
+	Material(1,1,0.5,1.0,0.0,vec4(0.0,0.0,1.0,1.0)),// Blue Metallic material
+	Material(2,2,0.1,0.0,1.5,vec4(1.0,0.0,0.0,1.0)) // Red Dielectric material 
 );
 
-const Sphere spheres[MAX_SPHERES] = Sphere[](
-    Sphere(vec3(-2, 0, 0), 0.5, 0),   // Lambertian
-    Sphere(vec3(0, 0, 0), 0.5, 1),   // Metal
-    Sphere(vec3(2, 0, 0), 0.5, 2)   // Dielectric
+const Sphere spheres[4] = Sphere[](
+	Sphere(vec3(0, 6, 0),5.0,0),
+	Sphere(vec3(-2, 0, 0), 0.5, 1),   // Lambertian
+	Sphere(vec3(0, 0, 0), 0.5, 2),   // Metal
+	Sphere(vec3(2, 0, 0), 0.5, 3)   // Dielectric
 );
 float random(vec2 st){
     return fract(sin(dot(st.xy, vec2(12.9898,78.233)))* 43758.5453123);
 }
 
+vec3 SampleHemisphere(vec3 N){
+	float r1 = random(N.xy);
+	float r2 = random(N.xy);
+	float theta = 2.0 * PI * r1;
+	float phi = acos(sqrt(1.0-r2));
+	
+	//Sphereical to Catersian Conversion
+	vec3 direction;
+	direction.x = sin(phi) * cos(theta);
+	direction.y = sin(phi) * sin(theta);
+	direction.z = cos(phi);
+	
+	// Construct local coordinates
+	vec3 w = N;
+	vec3 a = (abs(w.x) >0.9)? vec3(0,1,0): vec3(1,0,0);
+	vec3 u = normalize(cross(a,w));
+	vec3 v = cross(w,u);
+	
+	return direction.x * u + direction.y * v + direction.z * w;
+}
 
-float SphereSDF(vec3 p, vec3 center){
-	return length(p-center) - 1.0;	
+float SphereSDF(vec3 p, vec3 center,float radius){
+	return length(p-center) - radius;	
 }
 float SceneSDF(vec3 p, out int matId){
 	float minDist = 1e9;
 	float dist = 1e9;
 	for(int i = 0;i<spheres.length();++i){
 		int m;
-		m = spheres[i].material;
-		dist = SphereSDF(p,spheres[i].center);
+		Sphere sphere = spheres[i];
+		m = sphere.material;
+		dist = SphereSDF(p,sphere.center,sphere.radius);
 		if(dist< minDist){
 			minDist = dist;
 			matId = m;
@@ -99,39 +125,69 @@ void RayIntersect(Ray ray,out Hit hit){
 	}
 	hit.dist = -1.0;
 }
-
 vec3 LambertianReflectanceBRDF(vec3 L, vec3 N,vec3 color,float intensity){
 	float LoN = dot(L,N) ;
 	return LoN * color * intensity/ PI;
 }
+vec3 CalculateDirectLighting(vec3 P, vec3 N,Material mat){
+	vec3 dirLight = vec3(0.0);
+	for(int i = 0; i< PointLights.length(); ++i){
+		PointLight light = PointLights[i];
+		vec3 L = normalize(light.position - P);
+		float distanceToLight = length(light.position - P);
+		vec3 lightDir = L;
+		float attenuation = 1.0/(distanceToLight *distanceToLight);
+		
+		Ray shadowRay;
+		shadowRay.origin = P + N *0.001;
+		shadowRay.direction = L;
+		Hit shadowHit;
+		RayIntersect(shadowRay,shadowHit);
+		if(shadowHit.dist > 0.0&& shadowHit.dist < distanceToLight){
+			continue;
+		}
+		
+		float NoL = max(dot(N,L),0.0);
+		vec3 BRDF = LambertianReflectanceBRDF(L,N,mat.color.rgb,1.0);
+		dirLight += light.color.w * BRDF * NoL * attenuation;
+	}
+	return dirLight;
+}
+
 vec3 TracePath(Ray ray){
-	vec3 radiance = vec3(1.0);
+	vec3 throughput = vec3(1.0);
+	vec3 radiance = vec3(0.0);
 	for(int i = 0; i < MAX_BOUNCES; ++i){
 		Hit hit;
 		// Find nearest object
 		RayIntersect(ray,hit);
-		// if we hit something
+		if(hit.dist<= 0.0)
+			return radiance + throughput * BACKGROUND;
+		// if we hit something determine its material
+		Material mat = materials[hit.materialId];
 		if(hit.dist>0.0){
-			// determine its material
-			Material mat = materials[hit.materialId];
-			// Calculate BRDF
-			vec3 L = vec3(0.0,1.0,1.0);
 			vec3 N = normalize(hit.normal);
+			vec3 directLight = CalculateDirectLighting(hit.point,N,mat);
+			radiance += throughput * directLight;
+			
+			// Importance sampling using Cosine weighted sampling of the hemisphere
+			vec3 L = SampleHemisphere(N);
+			// Calculate BRDF for indirect lights
 			vec3 BRDF = LambertianReflectanceBRDF(L,N,mat.color.rgb, .5);
-			// Contribution to the "Radiance"
-			radiance += BRDF;
+			float LoN = max(dot(L,N),0.0);
+			// Contribution of the indirect light to the "Radiance"
+			throughput *= BRDF * LoN;
+			radiance += throughput * BRDF;
 			// Determine how it reflects or refracts
 			// TODO: Reflections and Refractions
-			// update rays origin and dir to match relfection or fractions ray
-			// TODO: update ray origin and direction for continuation along path
-			// continue loop
+			// TODO: update rays origin and dir to match relfection or fractions ray
+			//  update ray origin and direction for continuation along path
+			ray.origin = hit.point + N * 0.001;
+			ray.direction = L;
 		}else{
-			radiance = BACKGROUND;
+			radiance += throughput * BACKGROUND; break;
 		}
-		// else we don't hit anything
-		// return background radiance
 	}
-	
 	return radiance;
 }
 vec2 NormalizedScreenCoords(vec2 screenCoord,vec2 iResolution){
@@ -156,13 +212,20 @@ void fragment() {
 	vec2 uv = NormalizedScreenCoords(FRAGCOORD.xy,Resolution);
 	vec3 camPos = vec3(0,0,-3);
 	vec3 at = vec3(0.0);
-	vec3 rayDir = GetCameraRayDir(uv,camPos,at);
-    for (int i = 0; i < SAMPLES_PER_PIXEL; i++) {
-        Ray ray;
-		// TODO: Stratiffied Jittering
-		ray.origin = camPos;
-		ray.direction = rayDir;
-		color += TracePath(ray);
+	vec3 rayDir;
+	int sqrtSamples = int(sqrt(float(SAMPLES_PER_PIXEL)));
+	vec2 stratumSize = 1.0/vec2(float(sqrtSamples)*Resolution);
+	for(int y = 0;y<sqrtSamples;++y){
+		for(int x = 0; x < sqrtSamples;++x){
+			float jitterX = random(uv) * stratumSize.x;
+			float jitterY = random(uv) * stratumSize.y;
+			vec2 jitteredUV = uv + vec2(float(x) / float(sqrtSamples) - 0.5 + jitterX, float(y) / float(sqrtSamples) - 0.5 + jitterY) / Resolution;
+			rayDir =  GetCameraRayDir(jitteredUV,camPos,at);
+			 Ray ray;
+			ray.origin = camPos;
+			ray.direction = rayDir;
+			color += TracePath(ray);
+		}
 	}
 	color /= float(SAMPLES_PER_PIXEL);
 	color = sqrt(color); // Gamma correction
