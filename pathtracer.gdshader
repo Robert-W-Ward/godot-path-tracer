@@ -25,6 +25,8 @@ struct Material{
 	float metallic;
 	float ior;
 	vec4 color;
+	vec4 specular; // for Phong specular xyz: color w: intensity
+	float shininess; // for Phon specular
 };
 
 struct PointLight{
@@ -32,15 +34,15 @@ struct PointLight{
 	vec4 color; //xyz color, w for intensity
 };
 const PointLight PointLights[3]  = PointLight[](
-	PointLight(vec3(0.0,-3.0,0.0),vec4(1.0,1.0,1.0,3.0)),
-	PointLight(vec3(-2.0,-3.0,0.0),vec4(1.0,1.0,1.0,30.0)),
-	PointLight(vec3(2.0,-3.0,0.0),vec4(1.0,1.0,1.0,30.0))
+	PointLight(vec3(0.0,-3.0,0.0),vec4(1.0,1.0,1.0,1.0)),
+	PointLight(vec3(-2.0,-3.0,0.0),vec4(1.0,1.0,1.0,1.0)),
+	PointLight(vec3(2.0,-3.0,0.0),vec4(1.0,1.0,1.0,1.0))
 );
 const Material materials[4] = Material[](
-	Material(1,1,0.5,1.0,0.0,vec4(1.0,1.0,1.0,1.0)),// White lambertian material
-	Material(0,0,0.0,0.0,0.0,vec4(0.0,1.0,0.0,1.0)),// Green lambertian material
-	Material(1,1,0.5,1.0,0.0,vec4(0.0,0.0,1.0,1.0)),// Blue Metallic material
-	Material(2,2,0.1,0.0,1.5,vec4(1.0,0.0,0.0,1.0)) // Red Dielectric material 
+	Material(1,1,0.5,1.0,0.0,vec4(1.0,1.0,1.0,1.0),vec4(1.0,1.0,1.0,1.0),.2),// White lambertian material
+	Material(0,0,0.0,0.0,0.0,vec4(0.0,1.0,0.0,1.0),vec4(1.0,1.0,1.0,1.0),.2),// Green lambertian material
+	Material(1,1,0.5,1.0,0.0,vec4(0.0,0.0,1.0,1.0),vec4(1.0,1.0,1.0,1.0),.2),// Blue Metallic material
+	Material(2,2,0.1,0.0,1.5,vec4(1.0,0.0,0.0,1.0),vec4(1.0,1.0,1.0,1.0),.2) // Red Dielectric material 
 );
 
 const Sphere spheres[4] = Sphere[](
@@ -129,7 +131,12 @@ vec3 LambertianReflectanceBRDF(vec3 L, vec3 N,vec3 color,float intensity){
 	float LoN = dot(L,N) ;
 	return LoN * color * intensity/ PI;
 }
-vec3 CalculateDirectLighting(vec3 P, vec3 N,Material mat){
+vec3 PhongSpecularReflectanceBRDF(vec3 L, vec3 N, vec3 V, vec3 specularColor, float shininess, float intensity){
+	vec3 R = reflect(-L,N);
+	float specularAngle = max(dot(V,R),0.0);
+	return specularColor * intensity * pow(specularAngle,shininess);
+}
+vec3 CalculateDirectLighting(vec3 P, vec3 N,vec3 V,Material mat){
 	vec3 dirLight = vec3(0.0);
 	for(int i = 0; i< PointLights.length(); ++i){
 		PointLight light = PointLights[i];
@@ -148,7 +155,9 @@ vec3 CalculateDirectLighting(vec3 P, vec3 N,Material mat){
 		}
 		
 		float NoL = max(dot(N,L),0.0);
-		vec3 BRDF = LambertianReflectanceBRDF(L,N,mat.color.rgb,1.0);
+		vec3 diffuse = LambertianReflectanceBRDF(L,N,mat.color.rgb,1.0);
+		vec3 specular = PhongSpecularReflectanceBRDF(L,N,V,mat.specular.rgb,mat.shininess,mat.specular.w);
+		vec3 BRDF = diffuse + specular;
 		dirLight += light.color.w * BRDF * NoL * attenuation;
 	}
 	return dirLight;
@@ -161,13 +170,14 @@ vec3 TracePath(Ray ray){
 		Hit hit;
 		// Find nearest object
 		RayIntersect(ray,hit);
+		// Don't hit return background
 		if(hit.dist<= 0.0)
 			return radiance + throughput * BACKGROUND;
-		// if we hit something determine its material
-		Material mat = materials[hit.materialId];
+		// if hit something get its material
 		if(hit.dist>0.0){
+			Material mat = materials[hit.materialId];
 			vec3 N = normalize(hit.normal);
-			vec3 directLight = CalculateDirectLighting(hit.point,N,mat);
+			vec3 directLight = CalculateDirectLighting(hit.point,N,-ray.direction,mat);
 			radiance += throughput * directLight;
 			
 			// Importance sampling using Cosine weighted sampling of the hemisphere
@@ -184,8 +194,6 @@ vec3 TracePath(Ray ray){
 			//  update ray origin and direction for continuation along path
 			ray.origin = hit.point + N * 0.001;
 			ray.direction = L;
-		}else{
-			radiance += throughput * BACKGROUND; break;
 		}
 	}
 	return radiance;
