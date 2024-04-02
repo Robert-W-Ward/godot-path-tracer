@@ -3,6 +3,7 @@ const vec3 BACKGROUND = vec3(1.0);
 const int MAX_SPHERES = 4;
 const int SAMPLES_PER_PIXEL = 32;
 const int MAX_BOUNCES = 10;
+varying vec4 FragCoord;
 struct Ray {
     vec3 origin;
     vec3 direction;
@@ -33,10 +34,19 @@ struct PointLight{
 	vec3 position;
 	vec4 color; //xyz color, w for intensity
 };
+
+struct AreaLight{
+	vec3 position;
+	vec3 normal;
+	vec3 up;
+	vec2 size;
+	vec4 color;
+};
+const AreaLight areaLight = AreaLight(vec3(0.0,-3.0,0.0),vec3(0.0,1.0,0.0),vec3(0.0,1.0,0.0),vec2(2,2),vec4(1.0));
 const PointLight PointLights[3]  = PointLight[](
-	PointLight(vec3(0.0,-3.0,0.0),vec4(1.0,1.0,1.0,1.0)),
-	PointLight(vec3(-2.0,-3.0,0.0),vec4(1.0,1.0,1.0,1.0)),
-	PointLight(vec3(2.0,-3.0,0.0),vec4(1.0,1.0,1.0,1.0))
+	PointLight(vec3(0.0,-3.0,0.0),vec4(1.0,1.0,1.0,0.0)),
+	PointLight(vec3(-2.0,-3.0,0.0),vec4(1.0,1.0,1.0,0.0)),
+	PointLight(vec3(2.0,-3.0,0.0),vec4(1.0,1.0,1.0,0.0))
 );
 const Material materials[4] = Material[](
 	Material(1,1,0.5,1.0,0.0,vec4(1.0,1.0,1.0,1.0),vec4(1.0,1.0,1.0,1.0),.2),// White lambertian material
@@ -74,6 +84,18 @@ vec3 SampleHemisphere(vec3 N){
 	vec3 v = cross(w,u);
 	
 	return direction.x * u + direction.y * v + direction.z * w;
+}
+vec3 SampleAreaLight(vec3 P, AreaLight light,out vec3 L, out float dist){
+	float u = random(FragCoord.xy + light.position.xy) - 0.5;
+	float v = random(FragCoord.xy + light.position.xy) - 0.5;
+	
+	vec3 lightRight = cross(light.normal, light.up);
+	
+	vec3 samplePos = light.position + light.up * (v*light.size.y) + lightRight * (u * light.size.x);
+	
+	L = normalize(samplePos - P);
+	dist = length(samplePos -P);
+	return samplePos;
 }
 
 float SphereSDF(vec3 p, vec3 center,float radius){
@@ -136,21 +158,46 @@ vec3 PhongSpecularReflectanceBRDF(vec3 L, vec3 N, vec3 V, vec3 specularColor, fl
 	float specularAngle = max(dot(V,R),0.0);
 	return specularColor * intensity * pow(specularAngle,shininess);
 }
-vec3 CalculateDirectLighting(vec3 P, vec3 N,vec3 V,Material mat){
+
+bool inShadow(Ray shadowRay, Hit shadowHit,float distToLight){
+	RayIntersect(shadowRay,shadowHit);
+	if(shadowHit.dist> 0.0 && shadowHit.dist < distToLight){
+		return false;
+	}else return true;
+}
+
+vec3 CalculateDirectLighting(vec3 P, vec3 N,vec3 V,Material mat,AreaLight al){
 	vec3 dirLight = vec3(0.0);
+	vec3 L = vec3(0.0);
+	float distanceToLight = 0.0;
+	
+	// Sample the Area ligth first
+	vec3 samplePos = SampleAreaLight(P,areaLight,L,distanceToLight);
+	float attenuation = 1.0/(distanceToLight * distanceToLight);
+	
+	// Shadow for area ligth
+ 	Ray shadowRay;
+	shadowRay.origin = P + N * 0.001;
+	shadowRay.direction = L;
+	Hit shadowHit;
+	if (inShadow(shadowRay,shadowHit,distanceToLight)) { // If not in shadow
+		float NoL = max(dot(N, L), 0.0);
+		vec3 diffuse = LambertianReflectanceBRDF(L, N, mat.color.rgb, 1.0);
+		vec3 specular = PhongSpecularReflectanceBRDF(L, N, V, mat.specular.rgb, mat.shininess, mat.specular.w);
+		vec3 BRDF = diffuse + specular;
+		dirLight += areaLight.color.w * BRDF * NoL * attenuation;
+	}
+	
 	for(int i = 0; i< PointLights.length(); ++i){
 		PointLight light = PointLights[i];
-		vec3 L = normalize(light.position - P);
-		float distanceToLight = length(light.position - P);
-		vec3 lightDir = L;
-		float attenuation = 1.0/(distanceToLight *distanceToLight);
+		L = normalize(light.position - P);
+		distanceToLight = length(light.position - P);
+		attenuation = 1.0/(distanceToLight * distanceToLight);
 		
-		Ray shadowRay;
 		shadowRay.origin = P + N *0.001;
 		shadowRay.direction = L;
-		Hit shadowHit;
-		RayIntersect(shadowRay,shadowHit);
-		if(shadowHit.dist > 0.0&& shadowHit.dist < distanceToLight){
+		shadowHit;
+		if(inShadow(shadowRay,shadowHit,distanceToLight)){
 			continue;
 		}
 		
@@ -177,7 +224,7 @@ vec3 TracePath(Ray ray){
 		if(hit.dist>0.0){
 			Material mat = materials[hit.materialId];
 			vec3 N = normalize(hit.normal);
-			vec3 directLight = CalculateDirectLighting(hit.point,N,-ray.direction,mat);
+			vec3 directLight = CalculateDirectLighting(hit.point,N,-ray.direction,mat, areaLight);
 			radiance += throughput * directLight;
 			
 			// Importance sampling using Cosine weighted sampling of the hemisphere
@@ -217,6 +264,7 @@ vec3 GetCameraRayDir(vec2 uv, vec3 camPos, vec3 camTarget){
 void fragment() {
     vec3 color = vec3(0.0);
 	vec2 Resolution = 1.0/SCREEN_PIXEL_SIZE;
+	FragCoord = FRAGCOORD;
 	vec2 uv = NormalizedScreenCoords(FRAGCOORD.xy,Resolution);
 	vec3 camPos = vec3(0,0,-3);
 	vec3 at = vec3(0.0);
