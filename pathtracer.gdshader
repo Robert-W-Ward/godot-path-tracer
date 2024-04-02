@@ -42,7 +42,7 @@ struct AreaLight{
 	vec2 size;
 	vec4 color;
 };
-const AreaLight areaLight = AreaLight(vec3(0.0,-3.0,0.0),vec3(0.0,1.0,0.0),vec3(0.0,1.0,0.0),vec2(2,2),vec4(1.0));
+const AreaLight areaLight = AreaLight(vec3(0.0,-3.0,0.0),vec3(0.0,1.0,0.0),vec3(0.0,1.0,0.0),vec2(4,4),vec4(1.0,0.0,0.0,1.0));
 const PointLight PointLights[3]  = PointLight[](
 	PointLight(vec3(0.0,-3.0,0.0),vec4(1.0,1.0,1.0,0.0)),
 	PointLight(vec3(-2.0,-3.0,0.0),vec4(1.0,1.0,1.0,0.0)),
@@ -170,24 +170,26 @@ vec3 CalculateDirectLighting(vec3 P, vec3 N,vec3 V,Material mat,AreaLight al){
 	vec3 dirLight = vec3(0.0);
 	vec3 L = vec3(0.0);
 	float distanceToLight = 0.0;
-	
-	// Sample the Area ligth first
-	vec3 samplePos = SampleAreaLight(P,areaLight,L,distanceToLight);
-	float attenuation = 1.0/(distanceToLight * distanceToLight);
-	
-	// Shadow for area ligth
- 	Ray shadowRay;
-	shadowRay.origin = P + N * 0.001;
-	shadowRay.direction = L;
+	float attenuation = 0.0;
+	Ray shadowRay;
 	Hit shadowHit;
-	if (inShadow(shadowRay,shadowHit,distanceToLight)) { // If not in shadow
-		float NoL = max(dot(N, L), 0.0);
-		vec3 diffuse = LambertianReflectanceBRDF(L, N, mat.color.rgb, 1.0);
-		vec3 specular = PhongSpecularReflectanceBRDF(L, N, V, mat.specular.rgb, mat.shininess, mat.specular.w);
-		vec3 BRDF = diffuse + specular;
-		dirLight += areaLight.color.w * BRDF * NoL * attenuation;
+	// Sample the Area light first
+	for(int s =0 ;s<3;++s){
+		vec3 samplePos = SampleAreaLight(P,areaLight,L,distanceToLight);
+	 	attenuation = 1.0/(distanceToLight * distanceToLight);
+		
+		// Shadow for area light
+		shadowRay.origin = P + N * 0.001;
+		shadowRay.direction = L;
+		if (inShadow(shadowRay,shadowHit,distanceToLight)) { // If not in shadow
+			float NoL = max(dot(N, L), 0.0);
+			vec3 diffuse = LambertianReflectanceBRDF(L, N, mat.color.rgb, 1.0);
+			vec3 specular = PhongSpecularReflectanceBRDF(L, N, V, mat.specular.rgb, mat.shininess, mat.specular.w);
+			vec3 BRDF = diffuse + specular;
+			dirLight += areaLight.color.w * BRDF * NoL * attenuation;
+		}
 	}
-	
+	dirLight /= float(3);
 	for(int i = 0; i< PointLights.length(); ++i){
 		PointLight light = PointLights[i];
 		L = normalize(light.position - P);
