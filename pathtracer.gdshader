@@ -1,7 +1,7 @@
 shader_type canvas_item;
-const vec3 BACKGROUND = vec3(1.0);
+const vec3 BACKGROUND = vec3(0.5);
 const int MAX_SPHERES = 4;
-const int SAMPLES_PER_PIXEL = 32;
+const int SAMPLES_PER_PIXEL = 64;
 const int MAX_BOUNCES = 10;
 varying vec4 FragCoord;
 struct Ray {
@@ -42,7 +42,13 @@ struct AreaLight{
 	vec2 size;
 	vec4 color;
 };
-const AreaLight areaLight = AreaLight(vec3(0.0,-3.0,0.0),vec3(0.0,1.0,0.0),vec3(0.0,1.0,0.0),vec2(4,4),vec4(1.0,0.0,0.0,1.0));
+const AreaLight areaLight = AreaLight(
+	vec3(0.0,-3.0,0.0),
+	vec3(0.0,-1.0,0.0),
+	vec3(0.0,0.0,1.0),
+	vec2(4,4),
+	vec4(1.0,1.0,1.0,3.0)
+	);
 const PointLight PointLights[3]  = PointLight[](
 	PointLight(vec3(0.0,-3.0,0.0),vec4(1.0,1.0,1.0,0.0)),
 	PointLight(vec3(-2.0,-3.0,0.0),vec4(1.0,1.0,1.0,0.0)),
@@ -174,7 +180,7 @@ vec3 CalculateDirectLighting(vec3 P, vec3 N,vec3 V,Material mat,AreaLight al){
 	Ray shadowRay;
 	Hit shadowHit;
 	// Sample the Area light first
-	for(int s =0 ;s<3;++s){
+	for(int s =0 ;s<5;++s){
 		vec3 samplePos = SampleAreaLight(P,areaLight,L,distanceToLight);
 	 	attenuation = 1.0/(distanceToLight * distanceToLight);
 		
@@ -189,7 +195,7 @@ vec3 CalculateDirectLighting(vec3 P, vec3 N,vec3 V,Material mat,AreaLight al){
 			dirLight += areaLight.color.w * BRDF * NoL * attenuation;
 		}
 	}
-	dirLight /= float(3);
+	dirLight /= float(5);
 	for(int i = 0; i< PointLights.length(); ++i){
 		PointLight light = PointLights[i];
 		L = normalize(light.position - P);
