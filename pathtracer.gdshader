@@ -21,7 +21,7 @@ struct Sphere {
 };
 struct Material{
 	int id;
-	int type;
+	int type; // 0 - Lambertian, 1 - Metallic, 2 - Dielectric
 	float roughness;
 	float metallic;
 	float ior;
@@ -46,25 +46,25 @@ const AreaLight areaLight = AreaLight(
 	vec3(0.0,-3.0,0.0),
 	vec3(0.0,-1.0,0.0),
 	vec3(0.0,0.0,1.0),
-	vec2(4,4),
-	vec4(1.0,1.0,1.0,0.0)
+	vec2(5,5),
+	vec4(1.0,1.0,1.0,1.0)
 	);
 const PointLight PointLights[3]  = PointLight[](
-	PointLight(vec3(0.0,-3.0,0.0),vec4(1.0,1.0,1.0,1.0)),
-	PointLight(vec3(-2.0,-3.0,0.0),vec4(1.0,1.0,1.0,1.0)),
-	PointLight(vec3(2.0,-3.0,0.0),vec4(1.0,1.0,1.0,1.0))
+	PointLight(vec3(0.0,-3.0,0.0),vec4(1.0,1.0,1.0,0.5)),
+	PointLight(vec3(-2.0,-3.0,0.0),vec4(1.0,1.0,1.0,0.5)),
+	PointLight(vec3(2.0,-3.0,0.0),vec4(1.0,1.0,1.0,0.5))
 );
 const Material materials[4] = Material[](
-	Material(0,1,0.5,0.8,0.0,vec4(1.0,1.0,1.0,1.0),vec4(1.0,1.0,1.0,1.0),.2), // White lambertian material
-	Material(1,0,0.0,0.0,0.0,vec4(0.0,1.0,0.0,1.0),vec4(1.0,1.0,1.0,0.5),.2), // Green lambertian material
-	Material(2,1,0.5,1.0,1.0,vec4(0.0,0.0,1.0,1.0),vec4(1.0,1.0,1.0,1.0),.2), // Blue Metallic material
-	Material(3,2,1.0,0.0,1.5,vec4(1.0,0.0,0.0,1.0),vec4(1.0,1.0,1.0,1.0),.2)  // Red Dielectric material 
+	Material(0,0,0.0,0.0,0.0,vec4(1.0,1.0,1.0,1.0),vec4(1.0,1.0,1.0,1.0),0.2), // White lambertian material
+	Material(1,0,0.0,0.0,0.0,vec4(0.0,1.0,0.0,1.0),vec4(1.0,1.0,1.0,0.2),0.2), // Green lambertian material
+	Material(2,1,1.0,1.0,1.0,vec4(0.0,0.0,1.0,1.0),vec4(1.0,1.0,1.0,0.0),0.0), // Blue Metallic material
+	Material(3,2,1.0,0.1,1.0,vec4(1.0,0.0,0.0,1.0),vec4(1.0,1.0,1.0,0.0),0.0)  // Red Dielectric material 
 );
 
 const Sphere spheres[4] = Sphere[](
 	Sphere(vec3(0, 6, 0),5.0,0),
 	Sphere(vec3(-2, 0, 0), 0.5, 1),   // Lambertian
-	Sphere(vec3(0, 0, 0), 0.5, 2),   // Metal
+	Sphere(vec3(0, 0, 0), 0.6, 2),   // Metal
 	Sphere(vec3(2, 0, 0), 0.5, 3)   // Dielectric
 );
 
@@ -85,8 +85,32 @@ float DistributionGGX(vec3 N, vec3 H, float roughness){
 	float numerator = a2;
 	float denom = (NoH2 * (a2-1.0)+1.0);
 	denom = 3.14159 * denom * denom;
-	
+
 	return numerator / denom;
+}
+
+vec3 SampleGGX(vec2 Xi, vec3 N, float roughness) {
+	float a = roughness * roughness;
+
+	// Transform Xi (a uniform random sample) into a sample on the hemisphere
+	float theta = atan(a * sqrt(Xi.x) / sqrt(1.0 - Xi.x));
+	float phi = 2.0 * PI * Xi.y;
+
+	// Spherical to Cartesian (assuming Y up)
+	vec3 H;
+	H.x = sin(theta) * cos(phi);
+	H.y = cos(theta);
+	H.z = sin(theta) * sin(phi);
+
+	// Transform H to be centered around N
+	vec3 upVector = abs(N.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+	vec3 tangent = normalize(cross(upVector, N));
+	vec3 bitangent = cross(N, tangent);
+
+	// Tangent space to world space
+	vec3 sampleVec = H.x * tangent + H.y * N + H.z * bitangent;
+
+	return normalize(sampleVec);
 }
 
 float GeometrySchlickGGX(float NoV, float roughness){
@@ -94,6 +118,7 @@ float GeometrySchlickGGX(float NoV, float roughness){
 	float k = (r*r) / 8.0;
 	float num = NoV;
 	float denom = NoV * (1.0 - k) +k;
+
 	return num /denom;
 }
 
@@ -102,9 +127,9 @@ float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness){
 	float NoL = max(dot(N,L),0.0);
 	float ggx1 = GeometrySchlickGGX(NoV,roughness);
 	float ggx2 = GeometrySchlickGGX(NoL,roughness);
-	return ggx1 * ggx2;
-}
 
+	return ggx1 * ggx2;	
+}
 vec3 SampleHemisphere(vec3 N){
 	float r1 = random(N.xy);
 	float r2 = random(N.xy);
@@ -125,19 +150,18 @@ vec3 SampleHemisphere(vec3 N){
 	
 	return direction.x * u + direction.y * v + direction.z * w;
 }
-vec3 SampleAreaLight(vec3 P, AreaLight light,out vec3 L, out float dist){
-	float u = random(FragCoord.xy + light.position.xy) - 0.5;
-	float v = random(FragCoord.xy + light.position.xy) - 0.5;
+vec3 SampleAreaLight(vec3 P,out vec3 L, out float dist){
+	float u = random(FragCoord.xy + areaLight.position.xy) - 0.5;
+	float v = random(FragCoord.xy + areaLight.position.xy) - 0.5;
 	
-	vec3 lightRight = cross(light.normal, light.up);
+	vec3 lightRight = cross(areaLight.normal, areaLight.up);
 	
-	vec3 samplePos = light.position + light.up * (v*light.size.y) + lightRight * (u * light.size.x);
+	vec3 samplePos = areaLight.position + areaLight.up * (v*areaLight.size.y) + lightRight * (u * areaLight.size.x);
 	
 	L = normalize(samplePos - P);
 	dist = length(samplePos -P);
 	return samplePos;
 }
-
 float SphereSDF(vec3 p, vec3 center,float radius){
 	return length(p-center) - radius;	
 }
@@ -171,7 +195,7 @@ vec3 CalculateNormal(vec3 p, float epsilon) {
     return normalize(n);
 }
 void RayIntersect(Ray ray,out Hit hit){
-	float tMin = 0.001;
+	float tMin = 0.01;
 	float tMax = 1000.0;
 
 	while(tMin<tMax){
@@ -198,90 +222,90 @@ vec3 PhongSpecularReflectanceBRDF(vec3 L, vec3 N, vec3 V, vec3 specularColor, fl
 	float specularAngle = max(dot(V,R),0.0);
 	return specularColor * intensity * pow(specularAngle,shininess);
 }
+vec3 CookTorranceSpecularReflectanceBRDF(vec3 L, vec3 V, vec3 N, Material mat, vec3 F0) {
+	vec3 H = normalize(V + L);
+	float D = DistributionGGX(N, H, mat.roughness);
+	vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
+	float G = GeometrySmith(N, V, L, mat.roughness);
 
-vec3 CookTorranceBRDF(vec3 L, vec3 V, vec3 N, Material mat, vec3 F0) {
-    vec3 H = normalize(V + L);
-    float D = DistributionGGX(N, H, mat.roughness);
-    vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
-    float G = GeometrySmith(N, V, L, mat.roughness);
+	float NoL = max(dot(N, L), 0.0);
+	float NoV = max(dot(N, V), 0.0);
 
-    float NdotL = max(dot(N, L), 0.0);
-    float NdotV = max(dot(N, V), 0.0);
-
-    vec3 numerator = D * F * G;
-    float denominator = 4.0 * NdotL * NdotV + 0.001; // Preventing division by zero
-    vec3 specular = numerator / denominator;
-
-    // Combining specular and diffuse reflectance
-    vec3 kD = vec3(1.0) - F; // This is for non-metals, for metals it will be zero
-    kD *= 1.0 - mat.metallic; // Completely specular for metals
-
-    vec3 diffuse = (1.0 - mat.metallic) * mat.color.rgb / PI;
-
-    return (kD * diffuse + specular) * NdotL; // This already includes Lambertian part for non-metallic
+	vec3 numerator = D * F * G;
+	float denominator = 4.0 * NoL * NoV + 0.001; // Preventing division by zero
+	vec3 specular = numerator / denominator;
+	return specular * NoL;
 }
-
-bool inShadow(Ray shadowRay, Hit shadowHit,float distToLight){
+bool CastsShadow(Ray shadowRay, Hit shadowHit,float distToLight){
 	RayIntersect(shadowRay,shadowHit);
 	if(shadowHit.dist> 0.0 && shadowHit.dist < distToLight){
 		return false;
 	}else return true;
 }
 
-vec3 CalculateDirectLighting(vec3 P, vec3 N,vec3 V,Material mat,AreaLight al){
-	vec3 dirLight = vec3(0.0);
-	vec3 L = vec3(0.0);
-	float distanceToLight = 0.0;
-	float attenuation = 0.0;
-	Ray shadowRay;
-	Hit shadowHit;
+vec3 CalcAreaLightContrib(vec3 P,vec3 N,vec3 V,Material mat){
+	int numSamples = 5;
+	vec3 AreaLightContrib = vec3(0.0);
 	vec3 F0 = mix(vec3(0.04),mat.color.rgb,mat.metallic);
-	// Sample the Area light first
-	for(int s =0 ;s<5;++s){
-		vec3 samplePos = SampleAreaLight(P,areaLight,L,distanceToLight);
-	 	attenuation = 1.0/(distanceToLight * distanceToLight);
+	for(int s = 0; s < numSamples; ++s){
+		float distanceToLight;
+		vec3 L = normalize(areaLight.position - P);
+		vec3 samplePos = SampleAreaLight(P,L,distanceToLight);
+	 	float attenuation = 1.0 / (distanceToLight * distanceToLight);
 		// Shadow for area light
+		Ray shadowRay;
 		shadowRay.origin = P + N * 0.001;
 		shadowRay.direction = L;
+		Hit shadowHit;
 		float NoL = max(dot(N, L), 0.0);
-
-		if (inShadow(shadowRay,shadowHit,distanceToLight)) { // If in shadow
-			// Metallics and Dielectrics use cook-torrance
+		if(CastsShadow(shadowRay,shadowHit,distanceToLight)){
 			if(mat.metallic > 0.0){
-				dirLight +=  CookTorranceBRDF(L,V,N,mat, F0) ;
+				vec3 BRDF = CookTorranceSpecularReflectanceBRDF(L,V,N,mat, F0);
+				AreaLightContrib += areaLight.color.w * BRDF * attenuation;
 			}else{
 				vec3 diffuse = LambertianReflectanceBRDF(L, N, mat.color.rgb, 1.0);
 				vec3 specular = PhongSpecularReflectanceBRDF(L, N, V, mat.specular.rgb, mat.shininess, mat.specular.w);
 				vec3 BRDF = diffuse + specular;
-				dirLight += areaLight.color.w * BRDF * NoL * attenuation;
+				AreaLightContrib += areaLight.color.w * BRDF * NoL * attenuation;
 			}
-			
 		}
 	}
-	dirLight /= float(5);
-	vec3 BRDF = vec3(0.0);
+	AreaLightContrib /= float(numSamples);
+	return AreaLightContrib;
+}
+vec3 CalcPointLightContrib(vec3 P,vec3 N,vec3 V,Material mat,float distanceToLight){
+	vec3 PointLightContrib = vec3(0.0);
+	vec3 F0 = mix(vec3(0.04),mat.color.rgb,mat.metallic);
 	for(int i = 0; i< PointLights.length(); ++i){
 		PointLight light = PointLights[i];
-		L = normalize(light.position - P);
-		distanceToLight = length(light.position - P);
-		attenuation = 1.0/(distanceToLight * distanceToLight);
+		vec3 L = normalize(light.position - P);
+		float distanceToLight = length(light.position - P);
+		float attenuation = 1.0/(distanceToLight * distanceToLight);
 		float NoL = max(dot(N,L),0.0);
-		
+		Ray shadowRay;
 		shadowRay.origin = P + N * 0.001;
 		shadowRay.direction = L;
-		shadowHit;
-		if(inShadow(shadowRay,shadowHit,distanceToLight)){
+		Hit shadowHit;
+		if(CastsShadow(shadowRay,shadowHit,distanceToLight)){
 			if (mat.metallic > 0.0){
-				dirLight += CookTorranceBRDF(L,V,N,mat,F0);	
+				PointLightContrib += CookTorranceSpecularReflectanceBRDF(L,V,N,mat,F0);	
 			}else{
 				vec3 diffuse = LambertianReflectanceBRDF(L,N,mat.color.rgb,1.0);
 				vec3 specular = PhongSpecularReflectanceBRDF(L,N,V,mat.specular.rgb,mat.shininess,mat.specular.w);
-				BRDF = diffuse + specular;
+				vec3 BRDF = diffuse + specular;
+				PointLightContrib += light.color.w * BRDF * NoL * attenuation;
 			}
-		dirLight += light.color.w * BRDF * NoL * attenuation;
 		}
 	}
-	return dirLight;
+	return PointLightContrib;
+}
+vec3 CalculateDirectLighting(vec3 P, vec3 N,vec3 V,Material mat){
+	vec3 directLight = vec3(0.0);
+	float distanceToLight = 0.0;
+	// Sample the Area light first
+	//directLight += CalcAreaLightContrib(P,N,V,mat);
+	directLight += CalcPointLightContrib(P,N,V,mat,distanceToLight);
+	return directLight;
 }
 
 vec3 TracePath(Ray ray){
@@ -295,32 +319,33 @@ vec3 TracePath(Ray ray){
 		if(hit.dist<= 0.0)
 			return radiance + throughput * BACKGROUND;
 		// if hit something get its material
-		if(hit.dist>0.0){
-			Material mat = materials[hit.materialId];
-			vec3 N = normalize(hit.normal);
-			vec3 directLight = CalculateDirectLighting(hit.point,N,-ray.direction,mat, areaLight);
-			radiance += throughput * directLight;
-			
-			// Importance sampling using Cosine weighted sampling of the hemisphere
-			vec3 L = SampleHemisphere(N);
-			vec3 BRDF;
-			if(mat.metallic<=0.0){
-				BRDF = LambertianReflectanceBRDF(L,N,mat.color.rgb, .5);
-			}else{
-				vec3 F0 = mix(vec3(0.04), mat.color.rgb, mat.metallic);
-				BRDF = CookTorranceBRDF(L,-ray.direction,N,mat,F0);
-			}
-			// Calculate BRDF for indirect lights
-			float LoN = max(dot(L,N),0.0);
-			// Contribution of the indirect light to the "Radiance"
-			throughput *= BRDF * LoN;
-			// Determine how it reflects or refracts
-			// TODO: Reflections and Refractions
-			// TODO: update rays origin and dir to match relfection or fractions ray
-			//  update ray origin and direction for continuation along path
-			ray.origin = hit.point + N * 0.001;
-			ray.direction = L;
-		}
+		Material mat = materials[hit.materialId];
+		vec3 N = normalize(hit.normal); // Normalized Normal
+		vec3 V = -ray.direction; // Direction of the viewer/eye
+		vec3 P = hit.point; // Point that was hit
+		
+		// Direct Lighting
+		vec3 directLight = CalculateDirectLighting(P,N,V,mat);
+		radiance += throughput * directLight;
+
+		// Indirect Lighting
+		//if(mat.metallic>0.0){
+			//// reflect based on the materials roughness such that roughness == 0.0 gives a perfect mirror reflection and 1.0 is completely blurred
+			//vec3 H = SampleGGX(FragCoord.xy,N,mat.roughness);
+			//vec3 L = reflect(V,H);
+			//vec3 F0 = mix(vec3(0.04),mat.color.rgb,mat.metallic);
+			//vec3 BRDF = CookTorranceSpecularReflectanceBRDF(L,V,N,mat,F0);
+			//// update throughput
+			//throughput *= BRDF;
+			//// update the radiance
+			//radiance += (throughput * BRDF);
+		//}else{
+			//vec3 L = SampleHemisphere(N);
+			//float LoN = max(dot(L,N),0.0);
+			//vec3 BRDF = LambertianReflectanceBRDF(L,N,mat.color.rgb,1.0);
+			//throughput *= BRDF * LoN;
+			//radiance += (throughput * BRDF);
+		//}
 	}
 	return radiance;
 }
