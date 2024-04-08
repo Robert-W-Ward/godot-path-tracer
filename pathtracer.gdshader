@@ -47,23 +47,23 @@ const AreaLight areaLight = AreaLight(
 	vec3(0.0,-1.0,0.0),
 	vec3(0.0,0.0,1.0),
 	vec2(5,5),
-	vec4(1.0,1.0,1.0,1.0)
+	vec4(1.0,1.0,1.0,5.0)
 	);
 const PointLight PointLights[3]  = PointLight[](
-	PointLight(vec3(0.0,-3.0,0.0),vec4(1.0,1.0,1.0,0.5)),
-	PointLight(vec3(-2.0,-3.0,0.0),vec4(1.0,1.0,1.0,0.5)),
-	PointLight(vec3(2.0,-3.0,0.0),vec4(1.0,1.0,1.0,0.5))
+	PointLight(vec3(0.0,1.0,0.0),vec4(1.0,1.0,1.0,5.0)),
+	PointLight(vec3(-2.0,-3.0,0.0),vec4(1.0,1.0,1.0,5.0)),
+	PointLight(vec3(2.0,-3.0,0.0),vec4(1.0,1.0,1.0,5.0))
 );
 const Material materials[4] = Material[](
 	// id,type,roughness,metallic,ior,color,specular,shininess
-	Material(0,0,0.0,0.0,0.0,vec4(1.0,1.0,1.0,1.0),vec4(1.0,1.0,1.0,1.0),0.2), // White lambertian material
-	Material(1,0,0.0,0.0,0.0,vec4(0.0,1.0,0.0,1.0),vec4(1.0,1.0,1.0,0.2),0.2), // Green lambertian material
-	Material(2,1,0.3,1.0,1.0,vec4(0.0,0.0,1.0,1.0),vec4(1.0,1.0,1.0,0.0),0.0), // Blue Metallic material
+	Material(0,0,0.0,0.0,0.0,vec4(1.0,1.0,1.0,1.0),vec4(1.0,1.0,1.0,1.0),1.0), // White lambertian material
+	Material(1,0,0.0,0.0,0.0,vec4(0.0,1.0,0.0,1.0),vec4(1.0,1.0,1.0,1.0),1.0), // Green lambertian material
+	Material(2,1,0.4,.2,1.0,vec4(0.0,0.0,1.0,1.0),vec4(1.0,1.0,1.0,0.0),0.0), // Blue Metallic material
 	Material(3,2,0.3,1.0,1.0,vec4(1.0,0.0,0.0,1.0),vec4(1.0,1.0,1.0,0.0),0.0)  // Red Dielectric material 
 );
 
 const Sphere spheres[4] = Sphere[](
-	Sphere(vec3(0, 6, 0),5.0,0),
+	Sphere(vec3(0, 8, 0),7.0,0),
 	Sphere(vec3(-2, 0, 0), 0.5, 1),   // Lambertian
 	Sphere(vec3(0, 0, 0), 0.6, 2),   // Metal
 	Sphere(vec3(2, 0, 0), 0.5, 3)   // Dielectric
@@ -304,7 +304,7 @@ vec3 CalculateDirectLighting(vec3 P, vec3 N,vec3 V,Material mat){
 	vec3 directLight = vec3(0.0);
 	float distanceToLight = 0.0;
 	// Sample the Area light first
-	//directLight += CalcAreaLightContrib(P,N,V,mat);
+	directLight += CalcAreaLightContrib(P,N,V,mat);
 	directLight += CalcPointLightContrib(P,N,V,mat,distanceToLight);
 	return directLight;
 }
@@ -329,11 +329,12 @@ vec3 TracePath(Ray ray){
 		vec3 P = hit.point; // Point that was hit
 		
 		// Direct Lighting
-		//vec3 directLight = CalculateDirectLighting(P,N,V,mat);
-		//radiance += throughput * directLight;
+		vec3 directLight = CalculateDirectLighting(P,N,V,mat);
+		radiance += throughput * directLight;
 
 		// Indirect Lighting
 		if(mat.metallic>0.0){
+			vec3 L;
 			if(mat.roughness == 0.0){
 				vec3 reflectDir = reflect(ray.direction,N);
 				ray.origin = P + N * 0.001;
@@ -342,6 +343,10 @@ vec3 TracePath(Ray ray){
 				vec2 Xi = vec2(random(P.xy),random(P.xy));
 				vec3 H = SampleGGX(Xi,N,mat.roughness);
 				vec3 reflectDir = reflect(-V,H);
+				vec3 F0 = vec3(0.4);
+				F0 = mix(F0,mat.color.rgb,mat.metallic);
+				vec3 BRDF = CookTorranceSpecularReflectanceBRDF(L,V,N,mat, F0);
+				throughput *= BRDF;
 				ray.origin = P + N * 0.001;
 				ray.direction = normalize(reflectDir);
 			}
