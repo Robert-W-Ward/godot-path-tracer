@@ -1,8 +1,11 @@
 shader_type canvas_item;
 const vec3 BACKGROUND = vec3(0.5);
 const int MAX_SPHERES = 4;
-const int SAMPLES_PER_PIXEL = 4;
-const int MAX_BOUNCES = 10;
+const int SAMPLES_PER_PIXEL = 32;
+const int MAX_BOUNCES = 100;
+#define LAMBERTIAN 0
+#define METALLIC 1
+#define DIELECTRIC 2
 varying vec4 FragCoord;
 struct Ray {
     vec3 origin;
@@ -47,26 +50,27 @@ const AreaLight areaLight = AreaLight(
 	vec3(0.0,-1.0,0.0),
 	vec3(0.0,0.0,1.0),
 	vec2(5,5),
-	vec4(1.0,1.0,1.0,0.0)
+	vec4(1.0,1.0,1.0,100.0)
 	);
-const PointLight PointLights[3]  = PointLight[](
-	PointLight(vec3(0.0,1.0,0.0),vec4(1.0,1.0,1.0,5.0)),
-	PointLight(vec3(-2.0,-3.0,0.0),vec4(1.0,1.0,1.0,5.0)),
-	PointLight(vec3(2.0,-3.0,0.0),vec4(1.0,1.0,1.0,5.0))
+const PointLight PointLights[4]  = PointLight[](
+	PointLight(vec3(0.0,0.0,-2.0),vec4(1.0,1.0,1.0,1.0)),
+	PointLight(vec3(-2.0,-3.0,0.0),vec4(1.0,1.0,1.0,1.0)),
+	PointLight(vec3(2.0,-3.0,0.0),vec4(1.0,1.0,1.0,1.0)),
+	PointLight(vec3(0.0,-3.0,0.0),vec4(1.0,1.0,1.0,1.0))
+	
+);
+const Sphere spheres[4] = Sphere[](
+	Sphere(vec3(0, 8, 0),7.0,0),
+	Sphere(vec3(-2.0, 0, 0), 0.5, 1),   // Lambertian
+	Sphere(vec3(0.0, 0, 0), 0.5, 2),   // Metal
+	Sphere(vec3(2, 0, 0), 0.5, 3)   // Dielectric
 );
 const Material materials[4] = Material[](
 	// id,type,roughness,metallic,ior,color,specular,shininess
-	Material(0,0,0.0,0.0,1.0,vec4(1.0,1.0,1.0,1.0),vec4(1.0,1.0,1.0,0.0),1.0), // White lambertian material
-	Material(1,0,0.0,0.0,1.0,vec4(0.0,1.0,0.0,1.0),vec4(1.0,1.0,1.0,1.0),10.0), // Green lambertian material
-	Material(2,1,0.4,.2,1.0,vec4(0.0,0.0,1.0,1.0),vec4(1.0,1.0,1.0,0.0),1.0), // Blue Metallic material
-	Material(3,2,0.5,0.0,1.5,vec4(1.0,0.0,0.0,1.0),vec4(1.0,1.0,1.0,0.1),0.0)  // Red Dielectric material 
-);
-
-const Sphere spheres[4] = Sphere[](
-	Sphere(vec3(0, 8, 0),7.0,0),
-	Sphere(vec3(-2, 0, 0), 0.5, 1),   // Lambertian
-	Sphere(vec3(0, 0, 0), 0.6, 2),   // Metal
-	Sphere(vec3(2, 0, 0), 0.5, 3)   // Dielectric
+	Material(0,LAMBERTIAN,0.0,0.0,1.0,vec4(1.0,1.0,1.0,1.0),vec4(1.0,1.0,1.0,0.0),1.0), // White lambertian material
+	Material(1,LAMBERTIAN,0.0,0.0,1.0,vec4(0.0,1.0,0.0,1.0),vec4(1.0,1.0,1.0,1.0),10.0), // Green lambertian material
+	Material(2,METALLIC,0.2,1.0,1.0,vec4(.0,.0,1.0,1.0),vec4(1.0,1.0,1.0,0.0),1.0), // Blue Metallic material
+	Material(3,DIELECTRIC,0.5,0.0,1.5,vec4(1.0,0.0,0.0,1.0),vec4(1.0,1.0,1.0,0.1),0.0)  // Red Dielectric material 
 );
 
 float random(vec2 st){
@@ -196,8 +200,8 @@ vec3 CalculateNormal(vec3 p, float epsilon) {
     return normalize(n);
 }
 void RayIntersect(Ray ray,out Hit hit){
-	float tMin = 0.01;
-	float tMax = 1000.0;
+	float tMin = 0.001;
+	float tMax = 10000.0;
 
 	while(tMin<tMax){
 		vec3 p = ray.origin + ray.direction * tMin;
@@ -235,169 +239,213 @@ vec3 CookTorranceSpecularReflectanceBRDF(vec3 L, vec3 V, vec3 N, Material mat, v
 	vec3 numerator = D * F * G;
 	float denominator = 4.0 * NoL * NoV + 0.001; // Preventing division by zero
 	vec3 specular = numerator / denominator;
-	return specular * NoL;
+	return specular;
 }
+vec3 TransmittanceBRDF(vec3 V, vec3 N, vec3 L, Material mat, vec3 F0){
+	vec3 H = normalize(V + L);
+	float D = DistributionGGX(N, H, mat.roughness);
+	vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
+
+	// Transmission is whatever light is not reflected by Fresnel's equation
+	vec3 T = (1.0 - F) * (1.0 - mat.metallic); // Non-metallic parts contribute to transmission
+	float NoL = max(dot(N, L), 0.0);
+	float NoV = max(dot(N, V), 0.0);
+	float G = GeometrySmith(N, V, L, mat.roughness);
+
+	// BTDF using microfacet theory, similar to the specular term but for the transmitted light
+	vec3 transmission = T * D * G / (4.0 * NoL * NoV);
+	return transmission;
+}
+
 bool CastsShadow(Ray shadowRay, Hit shadowHit,float distToLight){
 	RayIntersect(shadowRay,shadowHit);
 	if(shadowHit.dist> 0.0 && shadowHit.dist < distToLight){
-		return false;
-	}else return true;
+		return true;
+	}else return false;
 }
-
-vec3 CalcAreaLightContrib(vec3 P,vec3 N,vec3 V,Material mat){
-	int numSamples = 5;
+vec3 CalcAreaLightContrib(vec3 P,vec3 N,vec3 V,vec3 F0,Material mat){
+	int numSamples = 4;
 	vec3 AreaLightContrib = vec3(0.0);
-	vec3 F0 = mix(vec3(0.04),mat.color.rgb,mat.metallic);
+	float distanceToLight = 0.0;
+	vec3 L = normalize(areaLight.position - P); // default it to the center of the area light
+	vec3 samplePos = SampleAreaLight(P,L,distanceToLight); // sample the center first
+ 	float attenuation = 1.0 / (distanceToLight * distanceToLight);
+	vec3 BRDF = vec3(0.0);
+	Ray shadowRay;
+	shadowRay.origin = P + N * 0.001;
+	shadowRay.direction = L;
+	Hit shadowHit;
+	float NoL = max(dot(N, L), 0.0);
 	for(int s = 0; s < numSamples; ++s){
-		float distanceToLight;
-		vec3 L = normalize(areaLight.position - P);
-		vec3 samplePos = SampleAreaLight(P,L,distanceToLight);
-	 	float attenuation = 1.0 / (distanceToLight * distanceToLight);
-		// Shadow for area light
-		Ray shadowRay;
-		shadowRay.origin = P + N * 0.001;
-		shadowRay.direction = L;
-		Hit shadowHit;
-		float NoL = max(dot(N, L), 0.0);
-		if(CastsShadow(shadowRay,shadowHit,distanceToLight)){
-			if(mat.metallic > 0.0){
+		if(!CastsShadow(shadowRay,shadowHit,distanceToLight)){
+			switch(mat.type){
+			case LAMBERTIAN:
+				vec3 diffuse = LambertianReflectanceBRDF(L,N,mat.color.rgb,1.0);
+				vec3 specular = PhongSpecularReflectanceBRDF(L,N,V,mat.specular.rgb,mat.shininess,mat.specular.a);
+				BRDF = diffuse + specular;
+				AreaLightContrib += areaLight.color.w * BRDF * NoL * attenuation;
+				break;
+			case METALLIC:
 				vec3 BRDF = CookTorranceSpecularReflectanceBRDF(L,V,N,mat, F0);
 				AreaLightContrib += areaLight.color.w * BRDF * attenuation;
-			}else{
-				if(mat.type == 0){
-				// Lambertian diffuse + Phong specular
-					vec3 diffuse = LambertianReflectanceBRDF(L, N, mat.color.rgb, 1.0);
-					vec3 specular = PhongSpecularReflectanceBRDF(L, N, V, mat.specular.rgb, mat.shininess, mat.specular.w);
-					vec3 BRDF = diffuse + specular;
-					AreaLightContrib += areaLight.color.w * BRDF * NoL * attenuation;
-				}else{
-					// Dielectric Cook Torrance
-					vec3 F0 = vec3(0.04); // Base reflectivity for dielectrics
-					vec3 BRDF = CookTorranceSpecularReflectanceBRDF(L,V,N,mat, F0);
-					AreaLightContrib += areaLight.color.w * BRDF * attenuation;
-				}
+				break;
+			case DIELECTRIC:
+				// Dielectric Cook Torrance
+				F0 = vec3(0.04); // Base reflectivity for dielectrics
+				BRDF = CookTorranceSpecularReflectanceBRDF(L,V,N,mat, F0);
+				AreaLightContrib += areaLight.color.w * BRDF * attenuation;
+				break;
+			default:
+				break;
 			}
 		}
+		AreaLightContrib /= float(numSamples);
 	}
 	AreaLightContrib /= float(numSamples);
 	return AreaLightContrib;
 }
-vec3 CalcPointLightContrib(vec3 P,vec3 N,vec3 V,Material mat,float distanceToLight){
+vec3 CalcPointLightContrib(vec3 P,vec3 N,vec3 V,vec3 F0,Material mat){
 	vec3 PointLightContrib = vec3(0.0);
-	vec3 F0 = mix(vec3(0.04),mat.color.rgb,mat.metallic);
 	for(int i = 0; i< PointLights.length(); ++i){
 		PointLight light = PointLights[i];
 		vec3 L = normalize(light.position - P);
 		float distanceToLight = length(light.position - P);
-		float attenuation = 1.0/(distanceToLight * distanceToLight);
+		float attenuation = 1.0 / (distanceToLight * distanceToLight);
 		float NoL = max(dot(N,L),0.0);
+		vec3 BRDF;
 		Ray shadowRay;
 		shadowRay.origin = P + N * 0.001;
 		shadowRay.direction = L;
 		Hit shadowHit;
-		if(CastsShadow(shadowRay,shadowHit,distanceToLight)){
-			if (mat.metallic > 0.0){
-				PointLightContrib += CookTorranceSpecularReflectanceBRDF(L,V,N,mat,F0);	
-			}else{
-				if(mat.type == 0){
+		if(!CastsShadow(shadowRay,shadowHit,distanceToLight)){
+			switch(mat.type){
+				case LAMBERTIAN:
 					// Lambetian + Phong
 					vec3 diffuse = LambertianReflectanceBRDF(L,N,mat.color.rgb,1.0);
 					vec3 specular = PhongSpecularReflectanceBRDF(L,N,V,mat.specular.rgb,mat.shininess,mat.specular.w);
-					vec3 BRDF = diffuse + specular;
+					BRDF = diffuse + specular;
 					PointLightContrib += light.color.w * BRDF * NoL * attenuation;
-				}else{
+					break;
+				case METALLIC:
+					PointLightContrib += CookTorranceSpecularReflectanceBRDF(L,V,N,mat,F0) * light.color.w * attenuation;	
+					break;
+				case DIELECTRIC:
 					// Dielectric CookTorrance
-			 		vec3 F0 = vec3(0.04); // Base reflectivity for dielectrics
+			 		F0 = vec3(0.04); // Base reflectivity for dielectrics
                 	PointLightContrib += CookTorranceSpecularReflectanceBRDF(L,V,N,mat,F0) * light.color.w * attenuation;
-				}	
+					break;
 			}
 		}
 	}
 	return PointLightContrib;
 }
-vec3 CalculateDirectLighting(vec3 P, vec3 N,vec3 V,Material mat){
+vec3 CalculateDirectLighting(vec3 P, vec3 N,vec3 V,vec3 F0,Material mat){
 	vec3 directLight = vec3(0.0);
-	float distanceToLight = 0.0;
 	// Sample the Area light first
-	directLight += CalcAreaLightContrib(P,N,V,mat);
-	directLight += CalcPointLightContrib(P,N,V,mat,distanceToLight);
+	directLight += CalcAreaLightContrib(P,N,V,F0,mat);
+	// Then do point lights
+	directLight += CalcPointLightContrib(P,N,V,F0,mat);
 	return directLight;
 }
 
 vec3 TracePath(Ray ray){
 	vec3 throughput = vec3(1.0);
 	vec3 radiance = vec3(0.0);
+	vec3 color;
+	//D_0 + T_0 * L_0 * ( D_1 + L_1 * (D_2 + L_2....
+	// For each ray
+	// If the depth is >= to the maximum depth, terminate
 	for(int i = 0; i < MAX_BOUNCES; ++i){
 		Hit hit;
 		// Find nearest object
 		RayIntersect(ray,hit);
-		// TODO: Implement Russian roulette termination
+		//Russian roulette termination
+		if(i > 3){
+			float p = (throughput.x + throughput.y + throughput.z)/3.0;
+			if(random(FragCoord.xy) + float(i)> p){
+				break;
+			}
+			throughput/=p;
+		}
+		if(hit.dist<= 0.0)// Don't hit anything return background
+ 			return radiance += throughput * BACKGROUND;
+
 		
-		
-		// Don't hit return background
-		if(hit.dist<= 0.0)
-			return radiance + throughput * BACKGROUND;
-		// if hit something get its material
-		Material mat = materials[hit.materialId];
+		Material mat = materials[hit.materialId]; // hit surfaces material
 		vec3 N = normalize(hit.normal); // Normalized Normal
 		vec3 V = -ray.direction; // Direction of the viewer/eye
 		vec3 P = hit.point; // Point that was hit
-		vec3 L;
-		// Direct Lighting
-		vec3 directLight = CalculateDirectLighting(P,N,V,mat);
-		radiance += throughput * directLight;
+		vec3 F0 = mix(vec3(0.04),mat.color.rgb,mat.metallic);
+		vec3 directLight = CalculateDirectLighting(P,N,V,F0,mat); // Calculate direct lighting for this hit
+		radiance +=  throughput * directLight; // If doing direct lighting sample a light and add its comtribution	
+		
+		vec3 newDir;
+		float pdf = 1.0;
+		vec3 BRDF = vec3(1.0);
+		float cosTheta = 1.0;
 
-		// Indirect Lighting
-		if(mat.metallic>0.0){
-			if(mat.roughness == 0.0){
-				vec3 reflectDir = reflect(ray.direction,N);
+		//Indirect Lighting
+		switch(mat.type){
+			case LAMBERTIAN:
+				newDir = SampleHemisphere(N); // Cosine weighted hemisphere sampling
+				cosTheta = max(dot(N,newDir),0.0); //  
+				BRDF = LambertianReflectanceBRDF(newDir,V,mat.color.rgb,1.0);
+				pdf = cosTheta/(1.0*PI); // Uniform distribution over the hemisphere
+				throughput *= BRDF * cosTheta /pdf;
+				ray.direction = newDir;
 				ray.origin = P + N * 0.001;
-				ray.direction = reflectDir;
-			}else{
+				break;
+			case METALLIC:
 				vec2 Xi = vec2(random(P.xy),random(P.xy));
-				vec3 H = SampleGGX(Xi,N,mat.roughness);
-				vec3 reflectDir = reflect(-V,H);
-				vec3 F0 = vec3(0.4);
-				F0 = mix(F0,mat.color.rgb,mat.metallic);
-				vec3 BRDF = CookTorranceSpecularReflectanceBRDF(L,V,N,mat, F0);
-				throughput *= BRDF;
-				ray.origin = P + N * 0.001;
-				ray.direction = normalize(reflectDir);
-			}
-		}else{
-			if(mat.type == 0){
-				// Lambertian materials (replacing all not-metallic materials with dielectrics)
-				vec3 L = SampleHemisphere(N);
-				float LoN = max(dot(L,N),0.0);
-				vec3 BRDF = LambertianReflectanceBRDF(L,N,mat.color.rgb,1.0);
-				throughput *= BRDF * LoN;
-				radiance += (throughput * BRDF);
-			}else{
-				// handle dielectrics
-				vec2 Xi = vec2(random(P.xy),random(P.xy));
-				vec3 H = SampleGGX(Xi,N,mat.roughness);
-				vec3 F0 = vec3(0.04);
-				float fresnelReflectance = FresnelSchlick(max(dot(H,V),0.0),F0).x;
-				bool entering = dot(N,V)>0.0;
-				float eta = entering ? 1.0 /mat.ior:mat.ior;
-				vec3 N_refract = entering ? N : -N;
+				vec3 H = SampleGGX(Xi,N,mat.roughness);// For hit surface determine the next dir w_i by sampling
+				newDir =normalize(reflect(-V,H));
+				cosTheta = max(dot(N,newDir),0.0);
 				
-				vec3 refractDir = refract(ray.direction,N_refract,eta);
-				vec3 reflectDir = reflect(ray.direction,N);
+				BRDF = CookTorranceSpecularReflectanceBRDF(newDir,V,N,mat,F0); // Determine color/reflectance
+			    pdf = DistributionGGX(N, H, mat.roughness) * max(dot(N, H), 0.0) / (4.0 * abs(dot(H, V)));
 				
-				if(mat.roughness>0.0){
-					reflectDir = reflect(-V,H);
+				throughput *=  BRDF * cosTheta/pdf;
+				ray.direction = newDir;
+				ray.origin = P + N + 0.001;
+				break;
+			case DIELECTRIC:
+				float cosi = max(dot(N,-V),0.0); // Should V be negated again? because its already the negative ray.direction
+				bool entering = cosi > 0.0;
+				float etai = entering ? 1.0:mat.ior;
+				float etat = entering ? mat.ior : 1.0;
+				vec3 F0 = mix(vec3(0.04), mat.color.rgb, pow(1.0 - etai, 2.0) / pow(1.0 + etai, 2.0)); // Fresnel reflectance at normal incidence
+				vec3 fresnel = FresnelSchlick(cosi,F0);
+				vec3 reflectDir = reflect(V,N);
+				vec3 refractDir = refract(-V,entering?N:-N,etai/etat);
+				
+				float reflectProb = fresnel.x;
+				float transmitProb = 1.0 - reflectProb;
+				
+				if(refractDir == vec3(0.0)){ // total internal reflection
+					reflectProb = 1.0;
+					transmitProb = 0.0;
 				}
-				if(length(refractDir) == 0.0 || random(P.xy) < fresnelReflectance){
+				float p = random(P.xy);
+				if(p<reflectProb){
+					ray.direction = reflectDir;
 					ray.origin = P + N * 0.001;
-					ray.direction = normalize(reflectDir);
-					throughput *= vec3(fresnelReflectance);
+					cosTheta = max(dot(N,reflectDir),0.0);
+					BRDF = CookTorranceSpecularReflectanceBRDF(reflectDir,V,N,mat,F0);
+					pdf = reflectProb;
 				}else{
-					ray.origin = P +N_refract * 0.001;
-					ray.direction = normalize(refractDir);
-					throughput *= vec3(1.0 - fresnelReflectance);
+					ray.direction = refractDir;
+					ray.origin = P - N * 0.001;
+					cosTheta = max(dot(-N,refractDir),0.0);
+					BRDF = TransmittanceBRDF(V,N,refractDir,mat,F0);
+					pdf = transmitProb;
 				}
-			}
+				throughput *= BRDF * cosTheta / pdf;
+				break;
+			default:
+				break;
+		}
+		if(length(throughput)<0.001){
+			return radiance;
 		}
 	}
 	return radiance;
@@ -412,12 +460,13 @@ vec3 GetCameraRayDir(vec2 uv, vec3 camPos, vec3 camTarget){
 	vec3 camRight = normalize(cross(vec3(0.0, 1.0, 0.0), camForward));
 	vec3 camUp = normalize(cross(camForward, camRight));
 
-    // fPersp controls the camera's field of view. Try changing it!
+    // fPersp controls the camera's field of view.
     float fPersp = 2.0;
 	vec3 vDir = normalize(uv.x * camRight + uv.y * camUp + camForward * fPersp);
 
 	return vDir;
 }
+// For each pixel
 void fragment() {
     vec3 color = vec3(0.0);
 	vec2 Resolution = 1.0/SCREEN_PIXEL_SIZE;
@@ -428,11 +477,13 @@ void fragment() {
 	vec3 rayDir;
 	int sqrtSamples = int(sqrt(float(SAMPLES_PER_PIXEL)));
 	vec2 stratumSize = 1.0/vec2(float(sqrtSamples)*Resolution);
+	// For each sample
 	for(int y = 0;y<sqrtSamples;++y){
 		for(int x = 0; x < sqrtSamples;++x){
 			float jitterX = random(uv) * stratumSize.x;
 			float jitterY = random(uv) * stratumSize.y;
 			vec2 jitteredUV = uv + vec2(float(x) / float(sqrtSamples) - 0.5 + jitterX, float(y) / float(sqrtSamples) - 0.5 + jitterY) / Resolution;
+			// Generate a ray from eye to random pt w/in pixel with zero color
 			rayDir =  GetCameraRayDir(jitteredUV,camPos,at);
 		    Ray ray;
 			ray.origin = camPos;
