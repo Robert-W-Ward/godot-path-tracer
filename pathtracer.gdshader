@@ -55,10 +55,11 @@ const PointLight PointLights[3]  = PointLight[](
 	PointLight(vec3(2.0,-3.0,0.0),vec4(1.0,1.0,1.0,0.5))
 );
 const Material materials[4] = Material[](
+	// id,type,roughness,metallic,ior,color,specular,shininess
 	Material(0,0,0.0,0.0,0.0,vec4(1.0,1.0,1.0,1.0),vec4(1.0,1.0,1.0,1.0),0.2), // White lambertian material
 	Material(1,0,0.0,0.0,0.0,vec4(0.0,1.0,0.0,1.0),vec4(1.0,1.0,1.0,0.2),0.2), // Green lambertian material
-	Material(2,1,1.0,1.0,1.0,vec4(0.0,0.0,1.0,1.0),vec4(1.0,1.0,1.0,0.0),0.0), // Blue Metallic material
-	Material(3,2,1.0,0.1,1.0,vec4(1.0,0.0,0.0,1.0),vec4(1.0,1.0,1.0,0.0),0.0)  // Red Dielectric material 
+	Material(2,1,0.3,1.0,1.0,vec4(0.0,0.0,1.0,1.0),vec4(1.0,1.0,1.0,0.0),0.0), // Blue Metallic material
+	Material(3,2,0.3,1.0,1.0,vec4(1.0,0.0,0.0,1.0),vec4(1.0,1.0,1.0,0.0),0.0)  // Red Dielectric material 
 );
 
 const Sphere spheres[4] = Sphere[](
@@ -315,6 +316,9 @@ vec3 TracePath(Ray ray){
 		Hit hit;
 		// Find nearest object
 		RayIntersect(ray,hit);
+		// TODO: Implement Russian roulette termination
+		
+		
 		// Don't hit return background
 		if(hit.dist<= 0.0)
 			return radiance + throughput * BACKGROUND;
@@ -325,27 +329,29 @@ vec3 TracePath(Ray ray){
 		vec3 P = hit.point; // Point that was hit
 		
 		// Direct Lighting
-		vec3 directLight = CalculateDirectLighting(P,N,V,mat);
-		radiance += throughput * directLight;
+		//vec3 directLight = CalculateDirectLighting(P,N,V,mat);
+		//radiance += throughput * directLight;
 
 		// Indirect Lighting
-		//if(mat.metallic>0.0){
-			//// reflect based on the materials roughness such that roughness == 0.0 gives a perfect mirror reflection and 1.0 is completely blurred
-			//vec3 H = SampleGGX(FragCoord.xy,N,mat.roughness);
-			//vec3 L = reflect(V,H);
-			//vec3 F0 = mix(vec3(0.04),mat.color.rgb,mat.metallic);
-			//vec3 BRDF = CookTorranceSpecularReflectanceBRDF(L,V,N,mat,F0);
-			//// update throughput
-			//throughput *= BRDF;
-			//// update the radiance
-			//radiance += (throughput * BRDF);
-		//}else{
-			//vec3 L = SampleHemisphere(N);
-			//float LoN = max(dot(L,N),0.0);
-			//vec3 BRDF = LambertianReflectanceBRDF(L,N,mat.color.rgb,1.0);
-			//throughput *= BRDF * LoN;
-			//radiance += (throughput * BRDF);
-		//}
+		if(mat.metallic>0.0){
+			if(mat.roughness == 0.0){
+				vec3 reflectDir = reflect(ray.direction,N);
+				ray.origin = P + N * 0.001;
+				ray.direction = reflectDir;
+			}else{
+				vec2 Xi = vec2(random(P.xy),random(P.xy));
+				vec3 H = SampleGGX(Xi,N,mat.roughness);
+				vec3 reflectDir = reflect(-V,H);
+				ray.origin = P + N * 0.001;
+				ray.direction = normalize(reflectDir);
+			}
+		}else{
+			vec3 L = SampleHemisphere(N);
+			float LoN = max(dot(L,N),0.0);
+			vec3 BRDF = LambertianReflectanceBRDF(L,N,mat.color.rgb,1.0);
+			throughput *= BRDF * LoN;
+			radiance += (throughput * BRDF);
+		}
 	}
 	return radiance;
 }
@@ -381,7 +387,7 @@ void fragment() {
 			float jitterY = random(uv) * stratumSize.y;
 			vec2 jitteredUV = uv + vec2(float(x) / float(sqrtSamples) - 0.5 + jitterX, float(y) / float(sqrtSamples) - 0.5 + jitterY) / Resolution;
 			rayDir =  GetCameraRayDir(jitteredUV,camPos,at);
-			 Ray ray;
+		    Ray ray;
 			ray.origin = camPos;
 			ray.direction = rayDir;
 			color += TracePath(ray);
