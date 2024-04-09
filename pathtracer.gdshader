@@ -53,10 +53,10 @@ const AreaLight areaLight = AreaLight(
 	vec4(1.0,1.0,1.0,100.0)
 	);
 const PointLight PointLights[4]  = PointLight[](
-	PointLight(vec3(0.0,0.0,-2.0),vec4(1.0,1.0,1.0,1.0)),
-	PointLight(vec3(-2.0,-3.0,0.0),vec4(1.0,1.0,1.0,1.0)),
-	PointLight(vec3(2.0,-3.0,0.0),vec4(1.0,1.0,1.0,1.0)),
-	PointLight(vec3(0.0,-3.0,0.0),vec4(1.0,1.0,1.0,1.0))
+	PointLight(vec3(0.0,0.0,-2.0),vec4(1.0,1.0,1.0,5.0)),
+	PointLight(vec3(-2.0,-3.0,0.0),vec4(1.0,1.0,1.0,5.0)),
+	PointLight(vec3(2.0,-3.0,0.0),vec4(1.0,1.0,1.0,5.0)),
+	PointLight(vec3(0.0,-3.0,0.0),vec4(1.0,1.0,1.0,5.0))
 	
 );
 const Sphere spheres[4] = Sphere[](
@@ -69,8 +69,8 @@ const Material materials[4] = Material[](
 	// id,type,roughness,metallic,ior,color,specular,shininess
 	Material(0,LAMBERTIAN,0.0,0.0,1.0,vec4(1.0,1.0,1.0,1.0),vec4(1.0,1.0,1.0,0.0),1.0), // White lambertian material
 	Material(1,LAMBERTIAN,0.0,0.0,1.0,vec4(0.0,1.0,0.0,1.0),vec4(1.0,1.0,1.0,1.0),10.0), // Green lambertian material
-	Material(2,METALLIC,0.2,1.0,1.0,vec4(0.0,0.0,1.0,1.0),vec4(1.0,1.0,1.0,0.0),1.0), // Blue Metallic material
-	Material(3,DIELECTRIC,0.5,0.0,1.5,vec4(1.0,0.0,0.0,1.0),vec4(1.0,1.0,1.0,0.1),0.0)  // Red Dielectric material 
+	Material(2,METALLIC,.4,1.0,1.0,vec4(.0,.0,1.0,1.0),vec4(1.0,1.0,1.0,0.0),1.0), // Blue Metallic material
+	Material(3,DIELECTRIC,.5,0.0,1.5,vec4(1.0,0.0,0.0,1.0),vec4(1.0,1.0,1.0,0.1),0.0)  // Red Dielectric material 
 );
 
 float random(vec2 st){
@@ -244,22 +244,44 @@ vec3 CookTorranceSpecularReflectanceBRDF(vec3 L, vec3 V, vec3 N, Material mat, v
 	vec3 numerator = D * F * G;
 	float denominator = 4.0 * NoL * NoV + 0.001; // Preventing division by zero
 	vec3 specular = numerator / denominator;
-	return specular;
+	return specular ;
 }
-vec3 TransmittanceBRDF(vec3 V, vec3 N, vec3 L, Material mat, vec3 F0){
-	vec3 H = normalize(V + L);
-	float D = DistributionGGX(N, H, mat.roughness);
-	vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
+vec3 TransmittanceBRDF(vec3 V, vec3 N, vec3 L, Material mat, vec3 F0) {
+    vec3 H = normalize(V + L);
+    float D = DistributionGGX(N, H, mat.roughness);
+    vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
+    float G = GeometrySmith(N, V, L, mat.roughness);
 
-	// Transmission is whatever light is not reflected by Fresnel's equation
-	vec3 T = (1.0 - F) * (1.0 - mat.metallic); // Non-metallic parts contribute to transmission
-	float NoL = max(dot(N, L), 0.0);
-	float NoV = max(dot(N, V), 0.0);
-	float G = GeometrySmith(N, V, L, mat.roughness);
+    // Calculate reflection component using the BRDF formula
+    float NoL = max(dot(N, L), 0.0); // Ensure NoL is non-negative
+    float NoV = max(dot(N, V), 0.0); // Ensure NoV is non-negative
+    vec3 R = vec3(0.0);
+    if (NoL > 0.0 && NoV > 0.0) {
+        R = (F * D * G) / (4.0 * NoL * NoV);
+    }
 
-	// BTDF using microfacet theory, similar to the specular term but for the transmitted light
-	vec3 transmission = T * D * G / (4.0 * NoL * NoV);
-	return transmission;
+    // Check if the material is metallic; if so, transmission is not considered
+    if (mat.metallic > 0.0) {
+        // For metallic materials, only reflection is considered
+        return R;
+    }
+
+    // Calculate transmission component using BTDF, adjusted for non-metallic materials
+    vec3 transmission = vec3(0.0);
+    if (mat.metallic <= 0.0) { // Only non-metallic materials transmit light
+        // Incorporate the TransmittanceBTDF calculation directly
+        float eta = mat.ior; // Index of Refraction for the material
+        vec3 T = 1.0 - F; // Transmission Fresnel ter
+
+
+        float denom = 4.0 * NoL * NoV;
+        if (denom > 0.0) { // Ensure valid denominator
+            transmission = (T * D * G) / denom;
+        }
+    }
+    vec3 combined = R + transmission;
+
+    return combined;
 }
 
 bool CastsShadow(Ray shadowRay, Hit shadowHit,float distToLight){
@@ -384,11 +406,11 @@ vec3 TracePath(Ray ray){
 		
 		Material mat = materials[hit.materialId]; // hit surfaces material
 		vec3 N = normalize(hit.normal); // Normalized Normal
-		vec3 V =-ray.direction; // Direction of the viewer/eye
+		vec3 V = -ray.direction; // Direction of the viewer/eye
 		vec3 P = hit.point; // Point that was hit
 		vec3 F0 = mix(vec3(0.04),mat.color.rgb,mat.metallic);
 		vec3 directLight = CalculateDirectLighting(P,N,V,F0,mat); // Calculate direct lighting for this hit
-		//radiance +=  throughput * directLight; // If doing direct lighting sample a light and add its comtribution	
+		radiance +=  throughput * directLight; // If doing direct lighting sample a light and add its comtribution	
 		
 		vec3 newDir;
 		float pdf = 1.0;
@@ -407,11 +429,13 @@ vec3 TracePath(Ray ray){
 				ray.origin = P + N * 0.001;
 				break;
 			case METALLIC:
+				// V = -ray.direction
+				// OpenGL reflect and refract functions expect the "incident" vector i.e. ray.direction not -ray.direction
 				vec2 Xi = vec2(random(P.xy),random(P.xy));
 				vec3 H = SampleGGX(Xi,N,mat.roughness);// For hit surface determine the next dir w_i by sampling
-				newDir =normalize(reflect(-V,H));
+				newDir = reflect(-V,H);
 				cosTheta = max(dot(N,newDir),0.0);
-				
+				// Q1: Why is it black when perfectly reflective i.e. roughness = 0.0 A: The math breaks down at really low roughness
 				BRDF = CookTorranceSpecularReflectanceBRDF(newDir,V,N,mat,F0); // Determine color/reflectance
 			    pdf = DistributionGGX(N, H, mat.roughness) * max(dot(N, H), 0.0) / (4.0 * abs(dot(H, V)));
 				
@@ -420,24 +444,25 @@ vec3 TracePath(Ray ray){
 				ray.origin = P + N + 0.001;
 				break;
 			case DIELECTRIC:
-				float cosi = max(dot(N,V),0.0); // compute cosine of angle of incidence
+				// V = -ray.direction <- Check this is correct everywhere
+				float cosi = max(dot(V,N),0.0); // compute cosine of angle of incidence
 				bool entering = cosi > 0.0; // determine if we're entering the material
 				float etai = entering ? 1.0:mat.ior; // sets mediums ior (etai) of the medium the ray is coming from (out from)
 				float etat = entering ? mat.ior : 1.0; // set the ior of the mdieum the ray is entering (in to)
 				vec3 F0 = mix(vec3(0.04), mat.color.rgb, pow(1.0 - etai, 2.0) / pow(1.0 + etai, 2.0)); // Fresnel reflectance at normal incidence
 				vec3 fresnel = FresnelSchlick(cosi,F0); // gets the fresnel term
-				vec3 reflectDir = reflect(V,N); // reflects the view dir about the Normal 
-				vec3 refractDir = refract(-V,entering?N:-N,etai/etat); // reflects the 
+				vec3 reflectDir = reflect(-V,normalize(N)); // reflects the view dir about the Normal 
+				vec3 refractDir = max(refract(-V,entering?N:-N,etai/etat),0.0); // refracts the light about the normal
 				
 				float reflectProb = fresnel.x; // determines the prob of the reflection based on fresnel term
 				float transmitProb = 1.0 - reflectProb; // calculates the prob of transmittng (i.e. refracting light ) back out
-				
+				// Check prob between 0 and 1, and check V is correctly pointing away from the surface in other functions DO a dot product
 				if(refractDir == vec3(0.0)){ // total internal reflection
 					reflectProb = 1.0;
 					transmitProb = 0.0;
 				}
 				float p = random(P.xy); 
-				if(p<reflectProb){
+				if(p>reflectProb){
 					cosTheta = max(dot(N,reflectDir),0.0);
 					BRDF = CookTorranceSpecularReflectanceBRDF(reflectDir,V,N,mat,F0);
 					pdf = reflectProb;
@@ -445,7 +470,8 @@ vec3 TracePath(Ray ray){
 					ray.origin = P + N * 0.001;
 				}else{
 					cosTheta = max(dot(-N,refractDir),0.0);
-					BRDF = TransmittanceBRDF(-V,N,refractDir,mat,F0);
+					// Q3: Whats wrong with my transmittanceBRDF A: check transmittance func math
+					BRDF = TransmittanceBRDF(V,N,refractDir,mat,F0); 
 					pdf = transmitProb;
 					ray.direction = refractDir;
 					ray.origin = P - N * 0.001;
