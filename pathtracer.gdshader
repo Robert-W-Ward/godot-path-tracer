@@ -61,7 +61,7 @@ const PointLight PointLights[4]  = PointLight[](
 );
 const Sphere spheres[4] = Sphere[](
 	Sphere(vec3(0, 8, 0),7.0,0),
-	Sphere(vec3(-2.0, 0, 0), 0.5, 1),   // Lambertian
+	Sphere(vec3(-1.8, 0, -1), 0.5, 1),   // Lambertian
 	Sphere(vec3(0.0, 0, 0), 0.5, 2),   // Metal
 	Sphere(vec3(2, 0, 0), 0.5, 3)   // Dielectric
 );
@@ -69,8 +69,8 @@ const Material materials[4] = Material[](
 	// id,type,roughness,metallic,ior,color,specular,shininess
 	Material(0,LAMBERTIAN,0.0,0.0,1.0,vec4(1.0,1.0,1.0,1.0),vec4(1.0,1.0,1.0,0.0),1.0), // White lambertian material
 	Material(1,LAMBERTIAN,0.0,0.0,1.0,vec4(0.0,1.0,0.0,1.0),vec4(1.0,1.0,1.0,1.0),10.0), // Green lambertian material
-	Material(2,METALLIC,.4,1.0,1.0,vec4(.0,.0,1.0,1.0),vec4(1.0,1.0,1.0,0.0),1.0), // Blue Metallic material
-	Material(3,DIELECTRIC,.5,0.0,1.5,vec4(1.0,0.0,0.0,1.0),vec4(1.0,1.0,1.0,0.1),0.0)  // Red Dielectric material 
+	Material(2,METALLIC,.1,1.0,1.0,vec4(.0,.0,1.0,1.0),vec4(1.0,1.0,1.0,0.0),1.0), // Blue Metallic material
+	Material(3,DIELECTRIC,0.3,0.0,1.5,vec4(1.0,0.0,0.0,1.0),vec4(1.0,1.0,1.0,0.1),0.0)  // Red Dielectric material 
 );
 
 float random(vec2 st){
@@ -279,7 +279,7 @@ vec3 TransmittanceBRDF(vec3 V, vec3 N, vec3 L, Material mat, vec3 F0) {
             transmission = (T * D * G) / denom;
         }
     }
-    vec3 combined = R + transmission;
+    vec3 combined = R +  transmission;
 
     return combined;
 }
@@ -462,7 +462,7 @@ vec3 TracePath(Ray ray){
 					transmitProb = 0.0;
 				}
 				float p = random(P.xy); 
-				if(p>reflectProb){
+				if(p<reflectProb){
 					cosTheta = max(dot(N,reflectDir),0.0);
 					BRDF = CookTorranceSpecularReflectanceBRDF(reflectDir,V,N,mat,F0);
 					pdf = reflectProb;
