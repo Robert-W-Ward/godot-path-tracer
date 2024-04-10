@@ -70,7 +70,7 @@ const Material materials[4] = Material[](
 	Material(0,LAMBERTIAN,0.0,0.0,1.0,vec4(1.0,1.0,1.0,1.0),vec4(1.0,1.0,1.0,0.0),1.0), // White lambertian material
 	Material(1,LAMBERTIAN,0.0,0.0,1.0,vec4(0.0,1.0,0.0,1.0),vec4(1.0,1.0,1.0,1.0),10.0), // Green lambertian material
 	Material(2,METALLIC,.1,1.0,1.0,vec4(.0,.0,1.0,1.0),vec4(1.0,1.0,1.0,0.0),1.0), // Blue Metallic material
-	Material(3,DIELECTRIC,0.3,0.0,1.5,vec4(1.0,0.0,0.0,1.0),vec4(1.0,1.0,1.0,0.1),0.0)  // Red Dielectric material 
+	Material(3,DIELECTRIC,0.6,1.0,1.5,vec4(1.0,0.0,0.0,1.0),vec4(1.0,1.0,1.0,0.1),0.0)  // Red Dielectric material 
 );
 
 float random(vec2 st){
@@ -242,48 +242,89 @@ vec3 CookTorranceSpecularReflectanceBRDF(vec3 L, vec3 V, vec3 N, Material mat, v
 	float NoV = max(dot(N, V), 0.0);
 
 	vec3 numerator = D * F * G;
-	float denominator = 4.0 * NoL * NoV + 0.001; // Preventing division by zero
+	float denominator = 4.0 * NoL * NoV + .0001; // Preventing division by zero
 	vec3 specular = numerator / denominator;
 	return specular ;
 }
 vec3 TransmittanceBRDF(vec3 V, vec3 N, vec3 L, Material mat, vec3 F0) {
+	// Make this just a BTDF
     vec3 H = normalize(V + L);
     float D = DistributionGGX(N, H, mat.roughness);
     vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
     float G = GeometrySmith(N, V, L, mat.roughness);
-
     // Calculate reflection component using the BRDF formula
     float NoL = max(dot(N, L), 0.0); // Ensure NoL is non-negative
     float NoV = max(dot(N, V), 0.0); // Ensure NoV is non-negative
-    vec3 R = vec3(0.0);
-    if (NoL > 0.0 && NoV > 0.0) {
-        R = (F * D * G) / (4.0 * NoL * NoV);
-    }
 
-    // Check if the material is metallic; if so, transmission is not considered
-    if (mat.metallic > 0.0) {
-        // For metallic materials, only reflection is considered
-        return R;
-    }
 
     // Calculate transmission component using BTDF, adjusted for non-metallic materials
     vec3 transmission = vec3(0.0);
     if (mat.metallic <= 0.0) { // Only non-metallic materials transmit light
         // Incorporate the TransmittanceBTDF calculation directly
         float eta = mat.ior; // Index of Refraction for the material
-        vec3 T = 1.0 - F; // Transmission Fresnel ter
-
-
+        vec3 T = 1.0 - F; // Transmission Fresnel term
         float denom = 4.0 * NoL * NoV;
         if (denom > 0.0) { // Ensure valid denominator
             transmission = (T * D * G) / denom;
         }
     }
-    vec3 combined = R +  transmission;
+    vec3 combined =vec3(1.0); transmission;
 
     return combined;
 }
+vec3 TransmittanceBTDF(vec3 V, vec3 N, vec3 L, Material mat, vec3 F0) {
+    // V is the view direction
+    // L is the light direction (for the transmitted ray, this would be the direction of the refracted ray)
+    // N is the surface normal
+    // mat is the material properties
+    // F0 is the reflectance at normal incidence
 
+    // Only consider transmission for non-metallic materials
+    if (mat.metallic > 0.0) {
+        return vec3(0.0); // No transmission for metallic materials
+    }
+
+    // Compute the half vector between V and L
+    vec3 H = normalize(V + L);
+
+    // Calculate the Fresnel term using Schlick's approximation
+    float cosTheta = max(dot(N, -V), 0.0); // Using -V since V points toward the viewer
+    vec3 F = FresnelSchlick(cosTheta, F0);
+
+    // Calculate the D term (GGX normal distribution)
+    float D = DistributionGGX(N, H, mat.roughness);
+
+    // Calculate the geometry term G
+    float G = GeometrySmith(N, V, L, mat.roughness);
+
+    // Compute the amount of light not reflected (i.e., transmitted)
+    vec3 T = 1.0 - F; 
+
+    // Snell's law to find the transmitted direction, ensuring that V is negated since it points toward the viewer
+    vec3 transmittedDir = refract(-V, N, 1.0 / mat.ior);
+
+    // Calculate the transmitted component (we need to take the absolute value of dot products)
+    float NoL = abs(dot(N, L)); // Abs since we are dealing with transmitted light
+    float NoV = abs(dot(N, -V)); // Abs for the same reason as above
+
+    // Compute the transmitted light contribution
+    vec3 transmission = vec3(0.0);
+    if (NoL > 0.0 && NoV > 0.0) {
+        // Calculate the denominator of the BTDF (the 4.0 * NoL * NoV term comes from the microfacet BRDF derivation)
+        float eta = mat.ior; // Index of Refraction for the material
+        float eta2 = eta * eta; // Square of the IOR
+        float denom = 4.0 * NoL * NoV;
+
+        // Fresnel term adjusted for transmission
+        vec3 Ft = F * eta2;
+
+        // BTDF formula
+        transmission = (1.0 - Ft) * D * G / denom;
+    }
+
+    // Return the transmitted light (BTDF value)
+    return transmission * NoL; // Multiply by NoL to account for Lambert's cosine law
+}
 bool CastsShadow(Ray shadowRay, Hit shadowHit,float distToLight){
 	RayIntersect(shadowRay,shadowHit);
 	if(shadowHit.dist> 0.0 && shadowHit.dist < distToLight){
@@ -319,7 +360,7 @@ vec3 CalcAreaLightContrib(vec3 P,vec3 N,vec3 V,vec3 F0,Material mat){
 			case DIELECTRIC:
 				// Dielectric Cook Torrance
 				F0 = vec3(0.04); // Base reflectivity for dielectrics
-				vec3 transmittance = TransmittanceBRDF(V,N,L,mat, F0);
+				vec3 transmittance = TransmittanceBTDF(V,N,L,mat, F0);
 				vec3 directTransmittance =  areaLight.color.rgb * transmittance * NoL * attenuation;
 				//BRDF = CookTorranceSpecularReflectanceBRDF(L,V,N,mat, F0);
 				AreaLightContrib += directTransmittance;
@@ -363,7 +404,7 @@ vec3 CalcPointLightContrib(vec3 P,vec3 N,vec3 V,vec3 F0,Material mat){
 				case DIELECTRIC:
 					// Dielectric CookTorrance
 					vec3 specular = CookTorranceSpecularReflectanceBRDF(L,V,N,mat,F0);
-					vec3 transmission = TransmittanceBRDF(V,N,L,mat,F0);
+					vec3 transmission = TransmittanceBTDF(V,N,L,mat,F0);
 					vec3 reflectedLight = specular * light.color.rgb * attenuation;
 					vec3 transmittedLight = transmission * light.color.rgb * attenuation *  (1.0-F);
                 	PointLightContrib +=  reflectedLight + transmittedLight;
@@ -381,7 +422,11 @@ vec3 CalculateDirectLighting(vec3 P, vec3 N,vec3 V,vec3 F0,Material mat){
 	directLight += CalcPointLightContrib(P,N,V,F0,mat);
 	return directLight;
 }
-
+void swap(out float A, out float B){
+	float t = A;
+	A = B;
+	B = A;
+}
 vec3 TracePath(Ray ray){
 	vec3 throughput = vec3(1.0);
 	vec3 radiance = vec3(0.0);
@@ -438,49 +483,62 @@ vec3 TracePath(Ray ray){
 				// Q1: Why is it black when perfectly reflective i.e. roughness = 0.0 A: The math breaks down at really low roughness
 				BRDF = CookTorranceSpecularReflectanceBRDF(newDir,V,N,mat,F0); // Determine color/reflectance
 			    pdf = DistributionGGX(N, H, mat.roughness) * max(dot(N, H), 0.0) / (4.0 * abs(dot(H, V)));
-				
 				throughput *=  BRDF * cosTheta/pdf;
 				ray.direction = newDir;
-				ray.origin = P + N + 0.001;
+				ray.origin = P + N * 0.001;
 				break;
 			case DIELECTRIC:
-				// V = -ray.direction <- Check this is correct everywhere
-				float cosi = max(dot(V,N),0.0); // compute cosine of angle of incidence
-				bool entering = cosi > 0.0; // determine if we're entering the material
-				float etai = entering ? 1.0:mat.ior; // sets mediums ior (etai) of the medium the ray is coming from (out from)
-				float etat = entering ? mat.ior : 1.0; // set the ior of the mdieum the ray is entering (in to)
-				vec3 F0 = mix(vec3(0.04), mat.color.rgb, pow(1.0 - etai, 2.0) / pow(1.0 + etai, 2.0)); // Fresnel reflectance at normal incidence
-				vec3 fresnel = FresnelSchlick(cosi,F0); // gets the fresnel term
-				vec3 reflectDir = reflect(-V,normalize(N)); // reflects the view dir about the Normal 
-				vec3 refractDir = max(refract(-V,entering?N:-N,etai/etat),0.0); // refracts the light about the normal
-				
-				float reflectProb = fresnel.x; // determines the prob of the reflection based on fresnel term
-				float transmitProb = 1.0 - reflectProb; // calculates the prob of transmittng (i.e. refracting light ) back out
-				// Check prob between 0 and 1, and check V is correctly pointing away from the surface in other functions DO a dot product
-				if(refractDir == vec3(0.0)){ // total internal reflection
-					reflectProb = 1.0;
-					transmitProb = 0.0;
-				}
-				float p = random(P.xy); 
-				if(p<reflectProb){
-					cosTheta = max(dot(N,reflectDir),0.0);
-					BRDF = CookTorranceSpecularReflectanceBRDF(reflectDir,V,N,mat,F0);
-					pdf = reflectProb;
-					ray.direction = reflectDir;
+				// Assuming roughness is defined in your material structure: mat.roughness
+				vec3 H;
+				// Sample microfacet normal H based on GGX distribution and surface roughness
+				vec2 Xi = vec2(random(P.xy), random(P.xy)); // Random sample for GGX
+				H = SampleGGX(Xi, N, mat.roughness); // Sample GGX based on roughness and normal
+
+				float cosTheta = max(dot(-V, N), 0.0);
+				vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0); // Use microfacet normal for Fresnel
+
+				// Decide on reflection or refraction
+				float R = random(P.xy);
+				float F_avg = (F.x + F.y + F.z) / 3.0;
+				bool shouldReflect = R < F_avg;
+
+				if (shouldReflect) {
+				    // Reflect based on microfacet normal
+				    newDir = reflect(-V, H); // Note: Reflecting off H rather than N
+				    BRDF = CookTorranceSpecularReflectanceBRDF(newDir,H, N, mat, F0); // Adjusted for H
+				    ray.direction = newDir;
+				    ray.origin = P + N * 0.001;
+				} else {
+					float etaI = 1.0;
+					float etaT = mat.ior;
+					if(dot(V,N)>0.0){
+						swap(etaI,etaT);
+						N = -N;
+					}
+					float eta = etaI/etaT;
+					float cosThetaI = dot(-V,N);
+					float sinThetaI2 = max(0.0,1.0-cosThetaI * cosThetaI);
+					float sinThetaT2 = eta * eta* sinThetaI2;
+					if(sinThetaT2>1.0){ // TIR
+						newDir = reflect(V,N); // relfect instead
+					}else{
+						float cosThetaT = sqrt(max(0.0,1.0 - sinThetaT2));
+						vec3 refractDir = normalize(eta*-V + (eta*cosThetaI - cosThetaT)*N);
+						vec3 H = normalize(V+refractDir);
+						newDir = refract(-V,H,eta);
+						if(length(newDir) == 0.0){
+							newDir = reflect(V,N);//Fallback
+						}
+					}
+					BRDF = TransmittanceBTDF(V,N,newDir,mat,F0);
+					ray.direction = newDir;
 					ray.origin = P + N * 0.001;
-				}else{
-					cosTheta = max(dot(-N,refractDir),0.0);
-					// Q3: Whats wrong with my transmittanceBRDF A: check transmittance func math
-					BRDF = TransmittanceBRDF(V,N,refractDir,mat,F0); 
-					pdf = transmitProb;
-					ray.direction = refractDir;
-					ray.origin = P - N * 0.001;
+					throughput *= BRDF;
 				}
-				throughput *= BRDF * cosTheta / pdf;
 				break;
 			default:
 				break;
-		}
+			}
 		if(length(throughput)<0.001){
 			return radiance;
 		}
