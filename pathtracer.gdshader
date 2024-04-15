@@ -69,8 +69,8 @@ const Material materials[4] = Material[](
 	// id,type,roughness,metallic,ior,color,specular,shininess
 	Material(0,LAMBERTIAN,0.0,0.0,1.0,vec4(1.0,1.0,1.0,1.0),vec4(1.0,1.0,1.0,0.0),1.0), // White lambertian material
 	Material(1,LAMBERTIAN,0.0,0.0,1.0,vec4(0.0,1.0,0.0,1.0),vec4(1.0,1.0,1.0,1.0),10.0), // Green lambertian material
-	Material(2,METALLIC,.1,1.0,1.0,vec4(.0,.0,1.0,1.0),vec4(1.0,1.0,1.0,0.0),1.0), // Blue Metallic material
-	Material(3,DIELECTRIC,0.6,1.0,1.5,vec4(1.0,0.0,0.0,1.0),vec4(1.0,1.0,1.0,0.1),0.0)  // Red Dielectric material 
+	Material(2,METALLIC,.3,1.0,1.0,vec4(.0,.0,1.0,1.0),vec4(1.0,1.0,1.0,0.0),1.0), // Blue Metallic material
+	Material(3,DIELECTRIC,0.8,1.0,1.5,vec4(1.0,0.0,0.0,1.0),vec4(1.0,1.0,1.0,0.1),0.0)  // Red Dielectric material 
 );
 
 float random(vec2 st){
@@ -419,7 +419,7 @@ vec3 CalculateDirectLighting(vec3 P, vec3 N,vec3 V,vec3 F0,Material mat){
 	// Sample the Area light first
 	directLight += CalcAreaLightContrib(P,N,V,F0,mat);
 	// Then do point lights
-	directLight += CalcPointLightContrib(P,N,V,F0,mat);
+	//directLight += CalcPointLightContrib(P,N,V,F0,mat);
 	return directLight;
 }
 void swap(out float A, out float B){
